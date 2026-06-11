@@ -31,7 +31,12 @@ LAUNCHER_DIR = Path(__file__).parent.resolve()
 VERSION_FILE = LAUNCHER_DIR / "version.txt"
 APP_DIR = LAUNCHER_DIR / "App"
 EXE_PATH = APP_DIR / EXE_NAME
-DREAMBOT_SCRIPTS = Path(os.path.expandvars(r"%USERPROFILE%\DreamBot\Scripts"))
+# Common DreamBot Scripts paths (try in order)
+DREAMBOT_SCRIPT_PATHS = [
+    Path(os.path.expandvars(r"%USERPROFILE%\DreamBot\Scripts")),
+    Path.home() / "DreamBot" / "Scripts",
+    Path(os.path.expandvars(r"%LOCALAPPDATA%\DreamBot\Scripts")),
+]
 
 
 def find_exe() -> Path | None:
@@ -134,14 +139,31 @@ def extract_zip(zip_path: Path, dest_dir: Path) -> bool:
         return False
 
 
-def install_jar(jar_path: Path) -> bool:
+def find_dreambot_scripts() -> Path | None:
+    """Find the DreamBot Scripts folder from common locations."""
+    for path in DREAMBOT_SCRIPT_PATHS:
+        if path.exists():
+            return path
+    # Fallback: create the first one
+    fallback = DREAMBOT_SCRIPT_PATHS[0]
     try:
-        DREAMBOT_SCRIPTS.mkdir(parents=True, exist_ok=True)
-        dest = DREAMBOT_SCRIPTS / JAR_ASSET_NAME
-        shutil.copy2(jar_path, dest)
-        return True
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
     except Exception:
-        return False
+        return None
+
+
+def install_jar(jar_path: Path) -> tuple[bool, str]:
+    """Copy JAR to DreamBot Scripts. Returns (success, error_message)."""
+    scripts_dir = find_dreambot_scripts()
+    if not scripts_dir:
+        return False, "Could not find or create DreamBot Scripts folder"
+    try:
+        dest = scripts_dir / JAR_ASSET_NAME
+        shutil.copy2(jar_path, dest)
+        return True, str(dest)
+    except Exception as e:
+        return False, str(e)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -294,8 +316,12 @@ class LauncherGUI:
             )
             if ok:
                 self.set_detail("Installing DreamBot script...")
-                install_jar(jar_path)
+                jar_ok, jar_msg = install_jar(jar_path)
                 jar_path.unlink(missing_ok=True)
+                if jar_ok:
+                    self.set_detail(f"Installed script to {jar_msg}")
+                else:
+                    self.set_detail(f"Script install failed: {jar_msg}")
                 self.set_progress(95)
 
         write_local_version(remote_tag)
@@ -368,8 +394,12 @@ def console_main():
             if jar_asset:
                 jar_path = LAUNCHER_DIR / JAR_ASSET_NAME
                 if download_file(jar_asset["browser_download_url"], jar_path):
-                    install_jar(jar_path)
+                    jar_ok, jar_msg = install_jar(jar_path)
                     jar_path.unlink(missing_ok=True)
+                    if jar_ok:
+                        print(f"[LAUNCHER] Installed script to {jar_msg}")
+                    else:
+                        print(f"[LAUNCHER] Script install failed: {jar_msg}")
 
             write_local_version(remote_tag)
             print(f"[LAUNCHER] Updated to v{remote_tag}")
